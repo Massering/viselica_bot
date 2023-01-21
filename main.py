@@ -8,13 +8,21 @@ from util import *
 bot = telebot.TeleBot(TOKEN)
 
 
+def count_mistakes(word: str, letters: list) -> int:
+    return len(set(letters) - set(word))
+
+
+def count_letters_remained(word: str, letters: list) -> int:
+    return len(set(word) - set(letters))
+
+
 def make_message(word: str, letters: list) -> str:
     s = word
     print(s, letters)
     for i in s:
         if i not in letters:
             s = s.replace(i, '_')
-    mistakes = len(set(letters) - set(s))
+    mistakes = count_mistakes(word, letters)
     print(s, mistakes)
 
     s += '\n'
@@ -48,24 +56,71 @@ def start(message: telebot.types.Message):
         elif message.text == '/start':
             bot.send_message(message.chat.id, 'Окей, а теперь пришли мне слово')
         else:
-            chats[chat] = (message.text.upper(), [])
+            chats[chat] = {'word': message.text.upper(), 'letters': []}
             bot.send_message(chat, make_message(*chats[chat]))
         return
 
-    bot.send_message(message.chat.id, 'Привет! Кто будет отгадывать?')
-    bot.register_next_step_handler(message, begin, set())
+    bot.send_message(message.chat.id, 'Привет всем! ' * (message.chat.id not in chats) + 'Кто будет загадывать слово?')
+    chats[message.chat.id] = 1
+    bot.register_next_step_handler(message, begin)
 
 
 @log
 def begin(message: telebot.types.Message):
     people[message.from_user.id] = message.chat.id
+    chats[message.chat.id] = 2
 
-    bot.send_message(message.chat.id, f'Отлично, {message.from_user.full_name}, а теперь отправь мне в лс слово!')
+    bot.send_message(message.chat.id,
+                     f'Отлично, {message.from_user.full_name}, а теперь отправь мне загаданное слово в лс!')
+    bot.register_next_step_handler(message, game)
+
+
+@log
+def game(message: telebot.types.Message):
+    if chats[message.chat.id] == 2:
+        bot.send_message(message.chat.id, 'Чуточку терпения, Ваш друг ещё не отправил мне слова')
+        bot.register_next_step_handler(message, game)
+        return
+
+    if chats[message.chat.id] == 0:
+        bot.send_message(message.chat.id, 'Игра уже окончена!', reply_to_message_id=message.id)
+        bot.register_next_step_handler(message, game)
+        return
+
+    if len(message.text) == 1:
+        letter = message.text.upper()
+        if letter in chats[message.chat.id]['letters']:
+            bot.send_message(message.chat.id, 'Эта буква уже была', reply_to_message_id=message.id)
+            bot.register_next_step_handler(message, game)
+        else:
+            chats[message.chat.id]['letters'] += [letter]
+
+            bot.send_message(message.chat.id, make_message(*chats[message.chat.id]))
+            mistakes = count_mistakes(*chats[message.chat.id])
+
+            if mistakes == len(VISELICA) - 1:
+                bot.send_message(message.chat.id, 'Угадывавшие проиграли. Поздравим загадавшего!')
+                chats[message.chat.id] = 0
+
+            elif count_letters_remained(*chats[message.chat.id]) == 0:
+                bot.send_message(message.chat.id, 'Угадывавшие выиграли. Поздравим их!')
+                chats[message.chat.id] = 0
+
+            else:
+                bot.register_next_step_handler(message, game)
+
+    else:
+        bot.send_message(message.chat.id, 'Это явно не буква.', reply_to_message_id=message.id)
+        bot.register_next_step_handler(message, game)
+
+    text = make_message(*chats[message.chat.id])
+    mistakes = count_mistakes(*chats[message.chat.id])
+    bot.register_next_step_handler(message, game)
 
 
 if __name__ == '__main__':
-    chats = {}
-    people = {}
+    chats = {}      # chat.id: {"word": "<word>", "letters": [<letters>])
+    people = {}     # user.id: chat.id
 
     while 1:
         try:
